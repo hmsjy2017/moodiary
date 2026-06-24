@@ -1,0 +1,65 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-ios-ipa:
+    name: Build unsigned IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: brew install jq
+
+      - name: Read Flutter Version
+        id: flutter_version
+        run: |
+          if [ -f .fvmrc ]; then
+            FLUTTER_VERSION=$(jq -r '.flutter' .fvmrc)
+            echo "Flutter version detected: $FLUTTER_VERSION"
+            echo "flutter-version=$FLUTTER_VERSION" >> "$GITHUB_ENV"
+          else
+            echo ".fvmrc not found. Defaulting to latest Flutter version."
+            echo "flutter-version=stable" >> "$GITHUB_ENV"
+          fi
+
+      - name: Set Up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.flutter-version }}
+          cache: true
+
+      - name: Set Up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          target: aarch64-apple-ios
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build iOS App Without Codesigning
+        run: flutter build ios --release --no-codesign
+
+      - name: Package Unsigned IPA
+        run: |
+          mkdir -p build/ios/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -qry ../moodiary-unsigned.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-ipa
+          path: build/ios/moodiary-unsigned.ipa
+          if-no-files-found: error
